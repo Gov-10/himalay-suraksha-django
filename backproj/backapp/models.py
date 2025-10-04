@@ -3,6 +3,7 @@ from django.contrib.auth.models import AbstractUser
 from phonenumber_field.modelfields import PhoneNumberField
 from django.utils import timezone
 import datetime
+from django.conf import settings
 UTTARAKHAND_CITIES = [
     ("Dehradun", "Dehradun"),
     ("Haridwar", "Haridwar"),
@@ -41,3 +42,16 @@ class PhoneOTP(models.Model):
 
     def is_expired(self):
         return timezone.now() > self.created_at + datetime.timedelta(minutes=5)
+
+class Alert(models.Model):
+    city = models.CharField(max_length=255)
+    risk_level = models.CharField(max_length=50)
+    hazard = models.CharField(max_length=100)
+    reason = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True
+    )
+
+    def __str__(self):
+        return f"{self.city} - {self.risk_level}"

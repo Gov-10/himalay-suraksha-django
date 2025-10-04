@@ -1,6 +1,6 @@
 from ninja import NinjaAPI
 from .schema import SignupSchema, TokenSchema, LoginSchema
-from .models import HimUser, PhoneOTP
+from .models import HimUser, PhoneOTP, Alert
 from ninja.errors import ValidationError
 from django.views.decorators.csrf import csrf_exempt
 import requests
@@ -13,7 +13,13 @@ from ninja.security import HttpBearer
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.exceptions import TokenError
+import json
+import redis
+from django.utils import timezone
 api = NinjaAPI(title="Himalay Suraksha API", version="1.0.0")
+redis_client = redis.StrictRedis(
+    host="localhost", port=6379, db=0, decode_responses=True
+)
 def generate_otp():
     return str(random.randint(100000, 999999))
 
@@ -139,6 +145,99 @@ def get_profile(request):
         "location": user.location
     }
 
+@csrf_exempt
+@api.get("/alerts", auth=JWTAuth())
+def get_alerts(request):
+    """
+    Return active alerts for the logged-in user's location
+    """
+    user = request.auth
+    alerts = []
+    pattern = f"alert:{user.location}"
+    alert_data = redis_client.get(pattern)
+    if alert_data:
+        alerts.append(json.loads(alert_data))
+    return {
+        "user": user.username,
+        "location": user.location,
+        "alerts": alerts,
+        "count": len(alerts),
+        "last_checked": timezone.now().isoformat()
+    }
 
+@csrf_exempt
+@api.post("/notify")
+def notify(request):
+    """
+    Store an alert pushed by Orkes/FastAPI AI into Redis,
+    and also archive into DB for history.
+    """
+    data = request.data 
+    city = data.get("city")
+    if not city:
+        return {"error": "City is required"}
+    # Save in Redis with expiry (10 mins)
+    key = f"alert:city:{city}"
+    redis_client.setex(key, 600, json.dumps(data))  
 
+    Alert.objects.create(
+        city=city,
+        risk_level=data.get("risk_level", "UNKNOWN"),
+        hazard=data.get("hazard", "unknown"),
+        reason=data.get("reason", "No reason provided")
+    )
 
+    return {"message": f"Alert stored for {city}", "alert": data}
+
+@csrf_exempt
+@api.get("/alerts/history", auth=JWTAuth())
+def alert_history(request, limit: int = 10, days: int = 7):
+    """
+    Return alert history for the logged-in user's location.
+    - limit: max number of alerts (default=10)
+    - days: look back window (default=7 days)
+    """
+    user = request.auth
+    since = timezone.now() - timezone.timedelta(days=days)
+    alerts = Alert.objects.filter(
+        city=user.location, created_at__gte=since
+    ).order_by("-created_at")[:limit]
+    alert_list = [
+        {
+            "city": alert.city,
+            "risk_level": alert.risk_level,
+            "hazard": alert.hazard,
+            "reason": alert.reason,
+            "created_at": alert.created_at.isoformat()
+        }
+        for alert in alerts
+    ]
+    return {
+        "user": user.username,
+        "location": user.location,
+        "alerts": alert_list,
+        "count": len(alert_list),
+        "since": since.isoformat(),
+        "limit": limit
+    }
+
+@csrf_exempt
+@api.get("/alerts/active", auth=JWTAuth())
+def get_active_alerts(request):
+    """
+    Return current active alerts for the logged-in user's location
+    (from Redis).
+    """
+    user = request.auth
+    alerts = []
+    key = f"alert:city:{user.location}"
+    alert_data = redis_client.get(key)
+    if alert_data:
+        alerts.append(json.loads(alert_data))
+    return {
+        "user": user.username,
+        "location": user.location,
+        "alerts": alerts,
+        "count": len(alerts),
+        "last_checked": timezone.now().isoformat()
+    }
