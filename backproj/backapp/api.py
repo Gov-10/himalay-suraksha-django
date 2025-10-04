@@ -1,5 +1,5 @@
 from ninja import NinjaAPI
-from .schema import SignupSchema, TokenSchema, LoginSchema
+from .schema import SignupSchema, TokenSchema, LoginSchema, NotifySchema, AlertResponseSchema
 from .models import HimUser, PhoneOTP, Alert
 from ninja.errors import ValidationError
 from django.views.decorators.csrf import csrf_exempt
@@ -16,6 +16,7 @@ import json
 import redis
 from django.utils import timezone
 from django.contrib.auth import logout as django_logout
+from typing import List
 
 api = NinjaAPI(title="Himalay Suraksha API", version="1.0.0")
 
@@ -49,12 +50,10 @@ def verify_recaptcha(token: str) -> bool:
     if not result.get("success", False):
         return False
 
-    # Handle v3 keys (score exists)
-    if "score" in result:
+    if "score" in result:  # reCAPTCHA v3
         return result["score"] >= 0.5
 
-    # For v2, success = True is enough
-    return True
+    return True  # v2 fallback
 
 # ----------------- AUTH -----------------
 
@@ -162,7 +161,7 @@ def get_profile(request):
 @api.get("/alerts", auth=JWTAuth())
 def get_alerts(request):
     """
-    Return active alerts for the logged-in user's location
+    Return active alerts for the logged-in user's location (from Redis).
     """
     user = request.auth
     alerts = []
@@ -180,14 +179,13 @@ def get_alerts(request):
 
 @csrf_exempt
 @api.post("/notify")
-def notify(request):
+def notify(request, data: NotifySchema):
     """
     Store an alert pushed by Orkes/FastAPI AI into Redis,
     and also archive into DB for history.
     """
-    data = request.data
-    city = data.get("city")
-    risks = data.get("risks", [])
+    city = data.city
+    risks = data.risks
 
     if not city:
         return {"error": "City is required"}
@@ -196,21 +194,22 @@ def notify(request):
 
     # Save full payload in Redis with expiry (10 mins)
     key = f"alert:city:{city}"
-    redis_client.setex(key, 600, json.dumps(data))
+    redis_client.setex(key, 600, data.json())
 
     # Store each risk separately in DB
     for risk in risks:
         Alert.objects.create(
             city=city,
-            risk_level=risk.get("risk_level", "UNKNOWN"),
-            hazard=risk.get("hazard_type", "unknown"),
-            reason=risk.get("reason", "No reason provided")
+            risk_level=risk.risk_level,
+            hazard_type=risk.hazard_type,
+            reason=risk.reason,
+            user=request.user if request.user.is_authenticated else None
         )
 
     return {"message": f"Alerts stored for {city}", "alerts": risks}
 
 @csrf_exempt
-@api.get("/alerts/history", auth=JWTAuth())
+@api.get("/alerts/history", response=List[AlertResponseSchema], auth=JWTAuth())
 def alert_history(request, limit: int = 10, days: int = 7):
     """
     Return alert history for the logged-in user's location.
@@ -223,32 +222,22 @@ def alert_history(request, limit: int = 10, days: int = 7):
         city=user.location, created_at__gte=since
     ).order_by("-created_at")[:limit]
 
-    alert_list = [
-        {
-            "city": alert.city,
-            "risk_level": alert.risk_level,
-            "hazard": alert.hazard,
-            "reason": alert.reason,
-            "created_at": alert.created_at.isoformat()
-        }
+    return [
+        AlertResponseSchema(
+            city=alert.city,
+            risk_level=alert.risk_level,
+            hazard_type=alert.hazard_type,
+            reason=alert.reason,
+            created_at=alert.created_at
+        )
         for alert in alerts
     ]
-
-    return {
-        "user": user.username,
-        "location": user.location,
-        "alerts": alert_list,
-        "count": len(alert_list),
-        "since": since.isoformat(),
-        "limit": limit
-    }
 
 @csrf_exempt
 @api.get("/alerts/active", auth=JWTAuth())
 def get_active_alerts(request):
     """
-    Return current active alerts for the logged-in user's location
-    (from Redis).
+    Return current active alerts for the logged-in user's location (from Redis).
     """
     user = request.auth
     alerts = []
