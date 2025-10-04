@@ -128,5 +128,17 @@ def logout(request):
     django_logout(request)
     return {"message": "Logout handled on client side by deleting the token."}
 
+@csrf_exempt
+@api.get("/dashboard", auth=JWTAuth())
+def get_profile(request):
+    user = request.auth
+    return {
+        "username": user.username,
+        "email": user.email,
+        "mobile_no": str(user.mobile_no),
+        "location": user.location
+    }
+
+
 
 
