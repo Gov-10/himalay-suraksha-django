@@ -1,6 +1,8 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from phonenumber_field.modelfields import PhoneNumberField
+from django.utils import timezone
+import datetime
 UTTARAKHAND_CITIES = [
     ("Dehradun", "Dehradun"),
     ("Haridwar", "Haridwar"),
@@ -31,3 +33,11 @@ class HimUser(AbstractUser):
     )
     def __str__(self):
         return self.username
+
+class PhoneOTP(models.Model):
+    mobile_no = models.CharField(max_length=15, unique=True)
+    otp = models.CharField(max_length=6)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    def is_expired(self):
+        return timezone.now() > self.created_at + datetime.timedelta(minutes=5)
