@@ -9,17 +9,22 @@ from django.conf import settings
 from ninja.security import HttpBearer
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
-from ninja.security import HttpBearer
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.exceptions import TokenError
 import json
 import redis
 from django.utils import timezone
+from django.contrib.auth import logout as django_logout
+
 api = NinjaAPI(title="Himalay Suraksha API", version="1.0.0")
+
 redis_client = redis.StrictRedis(
     host="localhost", port=6379, db=0, decode_responses=True
 )
+
+# ----------------- UTILS -----------------
+
 def generate_otp():
     return str(random.randint(100000, 999999))
 
@@ -51,6 +56,8 @@ def verify_recaptcha(token: str) -> bool:
     # For v2, success = True is enough
     return True
 
+# ----------------- AUTH -----------------
+
 @csrf_exempt
 @api.post("/verify-otp")
 def verify_otp(request, mobile_no: str, otp: str):
@@ -70,7 +77,7 @@ def verify_otp(request, mobile_no: str, otp: str):
 
 @csrf_exempt
 @api.post("/signup")
-def signup(request, data:SignupSchema):
+def signup(request, data: SignupSchema):
     if not verify_recaptcha(data.recaptcha_token):
         return api.create_response(request, {"error": "Invalid reCAPTCHA"}, status=400)
     if HimUser.objects.filter(username=data.username).exists():
@@ -81,18 +88,21 @@ def signup(request, data:SignupSchema):
         raise ValidationError([{"loc": ["mobile_no"], "msg": "Mobile number already exists"}])
     if data.password1 != data.password2:
         return api.create_response(request, {"error": "Passwords do not match"}, status=400)
+
     user = HimUser.objects.create_user(
         username=data.username,
         email=data.email,
         password=data.password1,
-        mobile_no=data.mobile_no, 
+        mobile_no=data.mobile_no,
         location=data.location,
         is_active=False
     )
     user.save()
+
     otp = generate_otp()
-    PhoneOTP.objects.update_or_create(mobile_no=user.mobile_no, defaults={"otp": otp})    
+    PhoneOTP.objects.update_or_create(mobile_no=user.mobile_no, defaults={"otp": otp})
     resp = send_sms(user.mobile_no, otp)
+
     return {"message": "User created successfully. OTP sent to your mobile.", "sms_resp": resp}
 
 @csrf_exempt
@@ -127,12 +137,13 @@ class JWTAuth(HttpBearer):
         except TokenError:
             return None
 
-from django.contrib.auth import logout as django_logout
 @csrf_exempt
 @api.post("/logout")
 def logout(request):
     django_logout(request)
     return {"message": "Logout handled on client side by deleting the token."}
+
+# ----------------- USER DASHBOARD -----------------
 
 @csrf_exempt
 @api.get("/dashboard", auth=JWTAuth())
@@ -145,6 +156,8 @@ def get_profile(request):
         "location": user.location
     }
 
+# ----------------- ALERT SYSTEM -----------------
+
 @csrf_exempt
 @api.get("/alerts", auth=JWTAuth())
 def get_alerts(request):
@@ -153,8 +166,8 @@ def get_alerts(request):
     """
     user = request.auth
     alerts = []
-    pattern = f"alert:{user.location}"
-    alert_data = redis_client.get(pattern)
+    key = f"alert:city:{user.location}"
+    alert_data = redis_client.get(key)
     if alert_data:
         alerts.append(json.loads(alert_data))
     return {
@@ -172,22 +185,29 @@ def notify(request):
     Store an alert pushed by Orkes/FastAPI AI into Redis,
     and also archive into DB for history.
     """
-    data = request.data 
+    data = request.data
     city = data.get("city")
+    risks = data.get("risks", [])
+
     if not city:
         return {"error": "City is required"}
-    # Save in Redis with expiry (10 mins)
+    if not risks:
+        return {"error": "No risks provided"}
+
+    # Save full payload in Redis with expiry (10 mins)
     key = f"alert:city:{city}"
-    redis_client.setex(key, 600, json.dumps(data))  
+    redis_client.setex(key, 600, json.dumps(data))
 
-    Alert.objects.create(
-        city=city,
-        risk_level=data.get("risk_level", "UNKNOWN"),
-        hazard=data.get("hazard", "unknown"),
-        reason=data.get("reason", "No reason provided")
-    )
+    # Store each risk separately in DB
+    for risk in risks:
+        Alert.objects.create(
+            city=city,
+            risk_level=risk.get("risk_level", "UNKNOWN"),
+            hazard=risk.get("hazard_type", "unknown"),
+            reason=risk.get("reason", "No reason provided")
+        )
 
-    return {"message": f"Alert stored for {city}", "alert": data}
+    return {"message": f"Alerts stored for {city}", "alerts": risks}
 
 @csrf_exempt
 @api.get("/alerts/history", auth=JWTAuth())
@@ -202,6 +222,7 @@ def alert_history(request, limit: int = 10, days: int = 7):
     alerts = Alert.objects.filter(
         city=user.location, created_at__gte=since
     ).order_by("-created_at")[:limit]
+
     alert_list = [
         {
             "city": alert.city,
@@ -212,6 +233,7 @@ def alert_history(request, limit: int = 10, days: int = 7):
         }
         for alert in alerts
     ]
+
     return {
         "user": user.username,
         "location": user.location,

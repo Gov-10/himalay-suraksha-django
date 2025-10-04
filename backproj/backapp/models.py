@@ -46,12 +46,13 @@ class PhoneOTP(models.Model):
 class Alert(models.Model):
     city = models.CharField(max_length=255)
     risk_level = models.CharField(max_length=50)
-    hazard = models.CharField(max_length=100)
+    hazard_type = models.CharField(max_length=100)
     reason = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True
     )
-
+    class Meta:
+        ordering = ['-created_at']
     def __str__(self):
-        return f"{self.city} - {self.risk_level}"
+        return f"[{self.city}] {self.hazard_type} - {self.risk_level}"
