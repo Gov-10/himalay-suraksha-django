@@ -1,0 +1,32 @@
+services:
+  redis:
+    image: redis:7
+    restart: always
+    ports:
+      - "6379:6379"
+  
+  django:
+    build: .
+    container_name : himalay-suraksha-django
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - SECRET_KEY=django-insecure-7xg*119$n46^ftydih2y*o!fvp4x_c-!0f7@eelfm$pe^b$ii_
+      - REDIS_URL=redis://default:RfJEBnbMi1QGMwMQ0EEDjmTwceUrZ5N8@redis-19510.crce217.ap-south-1-1.ec2.redns.redis-cloud.com:19510
+      - MSG91_AUTH_KEY=471964AmUG3iF99fy68e0bc93P1
+      - MSG91_SENDER_ID=HIMALA
+      - MSG91_TEMPLATE_ID=68e0bdf5b5e11a69cf6e0ec2
+      - RECAPTCHA_PUBLIC_KEY=6LegTtArAAAAAG5gntXTQmDMoD4bMXUgLl_2X55k
+      - RECAPTCHA_PRIVATE_KEY=6LegTtArAAAAAKs8RIt1Bu0KQe17343H_SR_qoK6
+      - NEON_PASSWORD=npg_tTC6cU3MSZOm
+      - NEON_HOST=ep-frosty-butterfly-ad9knhu1-pooler.c-2.us-east-1.aws.neon.tech
+      - NEON_NAME=neondb
+      - NEON_USER=neondb_owner
+    depends_on:
+      - redis

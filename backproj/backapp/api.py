@@ -17,11 +17,21 @@ import redis
 from django.utils import timezone
 from django.contrib.auth import logout as django_logout
 from typing import List
+import os
 
 api = NinjaAPI(title="Himalay Suraksha API", version="1.0.0")
 
+import urllib.parse
+
+redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+parsed = urllib.parse.urlparse(redis_url)
+
 redis_client = redis.StrictRedis(
-    host="localhost", port=6379, db=0, decode_responses=True
+    host=parsed.hostname,
+    port=parsed.port,
+    password=parsed.password,
+    username=parsed.username,
+    decode_responses=True,
 )
 
 # ----------------- UTILS -----------------
