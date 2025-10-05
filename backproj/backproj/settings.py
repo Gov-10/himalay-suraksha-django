@@ -37,6 +37,21 @@ MSG91_TEMPLATE_ID=os.getenv("MSG91_TEMPLATE_ID")
 RECAPTCHA_PRIVATE_KEY = os.getenv("RECAPTCHA_PRIVATE_KEY")
 RECAPTCHA_PUBLIC_KEY = os.getenv("RECAPTCHA_PUBLIC_KEY")
 
+
+#----CORS Settings----
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "https://himalay-suraksha-django-566074036735.asia-south1.run.app"]
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+     "https://himalay-suraksha-django-566074036735.asia-south1.run.app",
+]
+SESSION_COOKIE_SAMESITE = "None"
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SAMESITE = "None"
+CSRF_COOKIE_SECURE = True
 # Application definition
 
 INSTALLED_APPS = [
